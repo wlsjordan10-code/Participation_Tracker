@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Class Attendance Tracker</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f2f2f2; }
+        .checked { text-decoration: line-through; background: #d4edda; }
+        button { padding: 10px 20px; margin: 10px 0; }
+        #status { padding: 10px; margin: 10px 0; background: #fff3cd; }
+        input[type="file"] { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Class Attendance Tracker</h1>
+    <p>Enter password (simple auth: "teacher"): <input type="password" id="pwd" placeholder="Password"></p>
+    <button onclick="login()">Login</button>
+    <div id="app" style="display:none;">
+        <input type="file" id="csvFile" accept=".csv" onchange="loadCSV()">
+        <p>Press SPACEBAR to start listening. Say student names. Say "complete" or "done" to finish and download PDF.</p>
+        <div id="status">Upload CSV with headers: name,email</div>
+        <table id="classList"><thead><tr><th>Name</th><th>Email</th><th>Attended</th></tr></thead><tbody></tbody></table>
+        <button onclick="generatePDF()">Download PDF</button>
+    </div>
+
+    <script>
+        const { jsPDF } = window.jspdf;
+        let students = [];
+        let recognition;
+        let isListening = false;
+        const PASSWORD = 'teacher';
+
+        function login() {
+            if (document.getElementById('pwd').value === PASSWORD) {
+                document.getElementById('app').style.display = 'block';
+                initSpeech();
+            } else {
+                alert('Wrong password');
+            }
+        }
+
+        function initSpeech() {
+            if (!('webkitSpeechRecognition' in window)) {
+                alert('Speech recognition not supported. Use Chrome/Edge.');
+                return;
+            }
+            const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript.toLowerCase();
+                }
+                if (transcript.includes('complete') || transcript.includes('done')) {
+                    generatePDF();
+                    stopListening();
+                } else {
+                    const name = findBestMatch(transcript);
+                    if (name) {
+                        markAttended(name);
+                    }
+                }
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                document.getElementById('status').textContent = 'Listening stopped. Press SPACEBAR to resume.';
+            };
+        }
+
+        function loadCSV() {
+            const file = document.getElementById('csvFile').files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const lines = e.target.result.split('\n');
+                students = [];
+                const tbody = document.querySelector('#classList tbody');
+                tbody.innerHTML = '';
+                for (let i = 1; i < lines.length; i++) {
+                    const [name, email] = lines[i].split(',');
+                    if (name) {
+                        students.push({ name: name.trim(), email: email ? email.trim() : '', attended: false });
+                        const row = tbody.insertRow();
+                        row.innerHTML = `<td>${name.trim()}</td><td>${email ? email.trim() : ''}</td><td><input type="checkbox" onchange="markAttended('${name.trim()}')"></td>`;
+                    }
+                }
+                document.getElementById('status').textContent = `Loaded ${students.length} students. Press SPACEBAR to start listening.`;
+            };
+            reader.readAsText(file);
+        }
+
+        function findBestMatch(transcript) {
+            let bestMatch = null;
+            let bestScore = 0;
+            students.forEach((student) => {
+                if (!student.attended) {
+                    const score = stringSimilarity(transcript, student.name.toLowerCase());
+                    if (score > bestScore && score > 0.4) {  // Fuzzy threshold
+                        bestScore = score;
+                        bestMatch = student.name;
+                    }
+                }
+            });
+            return bestMatch;
+        }
+
+        function stringSimilarity(a, b) {
+            a = a.replace(/[^a-z0-9]/gi, '');
+            b = b.replace(/[^a-z0-9]/gi, '');
+            const matrix = [];
+            for (let i = 0; i <= b.length; i++) {
+                matrix[i] = [i];
+            }
+            for (let j = 0; j <= a.length; j++) {
+                matrix[0][j] = j;
+            }
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                        matrix[i][j] = matrix[i - 1][j - 1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            matrix[i][j - 1] + 1,
+                            matrix[i - 1][j] + 1
+                        );
+                    }
+                }
+            }
+            return 1 - matrix[b.length][a.length] / Math.max(a.length, b.length);
+        }
+
+        function markAttended(name) {
+            students.forEach((student) => {
+                if (student.name === name) {
+                    student.attended = true;
+                }
+            });
+            document.querySelectorAll('td').forEach((cell) => {
+                if (cell.textContent.includes(name)) {
+                    cell.closest('tr').classList.add('checked');
+                }
+            });
+            document.getElementById('status').textContent = `${name} marked as attended!`;
+        }
+
+        function startListening() {
+            if (students.length === 0) {
+                alert('Upload CSV first!');
+                return;
+            }
+            recognition.start();
+            isListening = true;
+            document.getElementById('status').textContent = 'Listening... Say names or "complete"/"done". Press SPACEBAR to stop.';
+        }
+
+        function stopListening() {
+            recognition.stop();
+            isListening = false;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !isListening) {
+                e.preventDefault();
+                startListening();
+            } else if (e.code === 'Space' && isListening) {
+                e.preventDefault();
+                stopListening();
+            }
+        });
+
+        function generatePDF() {
+            const attended = students.filter(s => s.attended);
+            const notAttended = students.filter(s => !s.attended);
+            const doc = new jsPDF();
+            doc.text('Class Attendance Report', 10, 10);
+            doc.text(`Date: ${new Date().toLocaleDateString()}`, 10, 20);
+            doc.text(`Attended (${attended.length}):`, 10, 40);
+            let y = 50;
+            attended.forEach((s, i) => {
+                doc.text(`${i+1}. ${s.name} (${s.email})`, 10, y);
+                y += 10;
+            });
+            y += 20;
+            doc.text(`Not Attended (${notAttended.length}):`, 10, y);
+            y += 10;
+            notAttended.forEach((s, i) => {
+                doc.text(`${i+1}. ${s.name} (${s.email})`, 10, y);
+                y += 10;
+            });
+            doc.save('attendance.pdf');
+        }
+    </script>
+</body>
+</html>
