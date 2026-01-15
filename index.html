@@ -104,7 +104,7 @@
 </head>
 <body>
     <div id="loginContainer" class="login-container">
-        <h1>Class Attendance Tracker</h1>
+        <h1>Class Participation Tracker</h1>
         <p>Enter password to access:</p>
         <input type="password" id="passwordInput" placeholder="****" maxlength="5">
         <div class="hint">Hint: All caps, 5 letters</div>
@@ -113,7 +113,7 @@
     </div>
 
     <div id="appContainer" class="app-container">
-        <h1>TCU Class Attendance</h1>
+        <h1>TCU Class Participation</h1>
         
         <div>
             <label for="csvFile" class="upload-btn">📁 Upload CSV Roster</label>
@@ -135,7 +135,7 @@
                     <th><input type="checkbox" id="selectAll" onchange="toggleAllCheckboxes()"></th>
                     <th>Name</th>
                     <th>Email</th>
-                    <th>Attended</th>
+                    <th>Participated</th>
                 </tr>
             </thead>
             <tbody id="studentTableBody"></tbody>
@@ -277,17 +277,17 @@
                 students: students.map(s => ({ name: s.name, email: s.email }))
             };
 
-            let presets = JSON.parse(localStorage.getItem('attendancePresets') || '[]');
+            let presets = JSON.parse(localStorage.getItem('participationPresets') || '[]');
             presets = presets.filter(p => p.title !== title);
             presets.unshift(presetData);
-            localStorage.setItem('attendancePresets', JSON.stringify(presets.slice(0, 10))); // Keep top 10
+            localStorage.setItem('participationPresets', JSON.stringify(presets.slice(0, 10))); // Keep top 10
 
             loadPresets();
             updateStatus(`💾 Saved "${title}" preset`);
         }
 
         function loadPresets() {
-            const presets = JSON.parse(localStorage.getItem('attendancePresets') || '[]');
+            const presets = JSON.parse(localStorage.getItem('participationPresets') || '[]');
             const container = document.getElementById('presetsContainer');
             container.innerHTML = '';
 
@@ -301,7 +301,7 @@
         }
 
         function loadPreset(index) {
-            const presets = JSON.parse(localStorage.getItem('attendancePresets') || '[]');
+            const presets = JSON.parse(localStorage.getItem('participationPresets') || '[]');
             const preset = presets[index];
             if (preset) {
                 students = preset.students.map(s => ({ ...s, attended: false }));
@@ -373,7 +373,7 @@
                     const index = students.indexOf(bestMatch);
                     students[index].attended = true;
                     updateTable();
-                    updateStatus(`✅ ${bestMatch.name} marked as attended!`);
+                    updateStatus(`✅ ${bestMatch.name} marked as participated!`);
                 }
             };
 
@@ -409,20 +409,20 @@
 
             let y = 20;
             doc.setFontSize(20);
-            doc.text('Class Attendance Report', 20, y);
+            doc.text('Class Participation Report', 20, y);
             y += 15;
 
             doc.setFontSize(12);
             doc.text(`Date: ${date}`, 20, y);
             y += 10;
 
-            const attended = students.filter(s => s.attended);
-            const notAttended = students.filter(s => !s.attended);
+            const participated = students.filter(s => s.attended);
+            const notParticipated = students.filter(s => !s.attended);
 
-            // Attended students
-            doc.text(`Attended (${attended.length}):`, 20, y);
+            // Participated students
+            doc.text(`Participated (P):`, 20, y);
             y += 10;
-            attended.forEach((student, i) => {
+            participated.forEach((student, i) => {
                 if (y > 270) {
                     doc.addPage();
                     y = 20;
@@ -431,16 +431,16 @@
                 y += 7;
             });
 
-            // Not attended
-            if (notAttended.length > 0) {
+            // Not participated
+            if (notParticipated.length > 0) {
                 if (y > 250) {
                     doc.addPage();
                     y = 20;
                 }
                 y += 10;
-                doc.text(`Not Attended (${notAttended.length}):`, 20, y);
+                doc.text(`Not Participated (NP):`, 20, y);
                 y += 10;
-                notAttended.forEach((student, i) => {
+                notParticipated.forEach((student, i) => {
                     if (y > 270) {
                         doc.addPage();
                         y = 20;
@@ -450,7 +450,7 @@
                 });
             }
 
-            doc.save('attendance.pdf');
+            doc.save('participation.pdf');
             updateStatus('📄 PDF downloaded successfully!');
         }
 
