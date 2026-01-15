@@ -2,4 +2,469 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCU Class Attendance Tracker</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .login-container {
+            text-align: center;
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .app-container {
+            display: none;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        input[type="password"] {
+            padding: 10px;
+            font-size: 16px;
+            width: 200px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+        .hint {
+            color: #666;
+            font-style: italic;
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .upload-btn { background: #4CAF50; color: white; }
+        .save-btn { background: #2196F3; color: white; }
+        .pdf-btn { background: #4CAF50; color: white; font-weight: bold; }
+        .preset-btn {
+            display: inline-block;
+            padding: 10px;
+            margin: 5px;
+            background: #e3f2fd;
+            border: 1px solid #2196F3;
+            border-radius: 5px;
+            cursor: pointer;
+            min-width: 120px;
+        }
+        .preset-btn:hover { background: #bbdefb; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #f8f9fa;
+            font-weight: bold;
+        }
+        .attended {
+            background: #d4edda !important;
+            text-decoration: line-through;
+            color: #155724;
+        }
+        .status-bar {
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .listening {
+            background: #d1ecf1 !important;
+            border: 2px solid #17a2b8;
+        }
+        .file-input { display: none; }
+        h1, h2 { color: #333; }
+        .spacebar-hint {
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="loginContainer" class="login-container">
+        <h1>Class Attendance Tracker</h1>
+        <p>Enter password to access:</p>
+        <input type="password" id="passwordInput" placeholder="****" maxlength="5">
+        <div class="hint">Hint: All caps, 5 letters</div>
+        <br><br>
+        <button onclick="checkPassword()">Login</button>
+    </div>
+
+    <div id="appContainer" class="app-container">
+        <h1>TCU Class Attendance</h1>
+        
+        <div>
+            <label for="csvFile" class="upload-btn">📁 Upload CSV Roster</label>
+            <input type="file" id="csvFile" class="file-input" accept=".csv" onchange="handleCSVUpload(event)">
+            <button class="save-btn" onclick="savePreset()" style="display:none;" id="saveBtn">💾 Save Preset</button>
+        </div>
+
+        <div id="presetsContainer" style="margin: 20px 0;"></div>
+
+        <div id="spacebarHint" class="spacebar-hint" style="display:none;">
+            🎤 Press SPACEBAR to start voice recognition. Press again to stop.
+        </div>
+
+        <div id="statusBar" class="status-bar" style="display:none;"></div>
+
+        <table id="studentTable" style="display:none;">
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="selectAll" onchange="toggleAllCheckboxes()"></th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Attended</th>
+                </tr>
+            </thead>
+            <tbody id="studentTableBody"></tbody>
+        </table>
+
+        <button class="pdf-btn" onclick="generatePDF()" id="pdfBtn" style="display:none;">
+            ✅ Complete & Download PDF
+        </button>
+    </div>
+
+    <script>
+        const PASSWORD = "TASBY";
+        let students = [];
+        let recognition = null;
+        let isListening = false;
+
+        // Levenshtein distance for fuzzy matching
+        function levenshteinDistance(str1, str2) {
+            const matrix = [];
+            for (let i = 0; i <= str2.length; i++) {
+                matrix[i] = [i];
+            }
+            for (let j = 0; j <= str1.length; j++) {
+                matrix[0][j] = j;
+            }
+            for (let i = 1; i <= str2.length; i++) {
+                for (let j = 1; j <= str1.length; j++) {
+                    if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                        matrix[i][j] = matrix[i - 1][j - 1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            matrix[i][j - 1] + 1,
+                            matrix[i - 1][j] + 1
+                        );
+                    }
+                }
+            }
+            return matrix[str2.length][str1.length];
+        }
+
+        function similarityScore(str1, str2) {
+            const longer = Math.max(str1.length, str2.length);
+            if (longer === 0) return 1;
+            return (longer - levenshteinDistance(str1, str2)) / longer;
+        }
+
+        function checkPassword() {
+            const input = document.getElementById('passwordInput').value;
+            if (input === PASSWORD) {
+                document.getElementById('loginContainer').style.display = 'none';
+                document.getElementById('appContainer').style.display = 'block';
+                loadPresets();
+            } else {
+                alert('❌ Wrong password! Hint: All caps, 5 letters');
+                document.getElementById('passwordInput').value = '';
+                document.getElementById('passwordInput').focus();
+            }
+        }
+
+        function handleCSVUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                parseCSV(text);
+            };
+            reader.readAsText(file);
+        }
+
+        function parseCSV(text) {
+            const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+            students = [];
+            
+            // Skip header row
+            for (let i = 1; i < lines.length; i++) {
+                const parts = lines[i].split(',').map(part => part.trim().replace(/^"|"$/g, ''));
+                if (parts.length >= 2) {
+                    const name = parts[0] || '';
+                    const email = parts[1] || '';
+                    if (name) {
+                        students.push({
+                            name: name.replace(/'/g, "\\'"), // Escape apostrophes
+                            email: email,
+                            attended: false
+                        });
+                    }
+                }
+            }
+
+            updateTable();
+            document.getElementById('saveBtn').style.display = 'inline-block';
+            updateStatus(`📊 Loaded ${students.length} students`);
+        }
+
+        function updateTable() {
+            const tbody = document.getElementById('studentTableBody');
+            const table = document.getElementById('studentTable');
+            tbody.innerHTML = '';
+
+            students.forEach((student, index) => {
+                const row = tbody.insertRow();
+                row.className = student.attended ? 'attended' : '';
+                row.innerHTML = `
+                    <td><input type="checkbox" ${student.attended ? 'checked' : ''} 
+                               onchange="toggleStudent(${index})"></td>
+                    <td>${student.name}</td>
+                    <td>${student.email}</td>
+                    <td>${student.attended ? '✅' : '❌'}</td>
+                `;
+            });
+
+            table.style.display = students.length ? 'table' : 'none';
+            document.getElementById('pdfBtn').style.display = students.length ? 'inline-block' : 'none';
+            document.getElementById('spacebarHint').style.display = students.length ? 'block' : 'none';
+        }
+
+        function toggleStudent(index) {
+            students[index].attended = !students[index].attended;
+            updateTable();
+        }
+
+        function toggleAllCheckboxes() {
+            const selectAll = document.getElementById('selectAll').checked;
+            students.forEach((student, index) => {
+                student.attended = selectAll;
+            });
+            updateTable();
+        }
+
+        function savePreset() {
+            const title = prompt('Enter preset name (e.g., "Calc 101 Jan 15"):');
+            if (!title || !students.length) return;
+
+            const presetData = {
+                title: title,
+                students: students.map(s => ({ name: s.name, email: s.email }))
+            };
+
+            let presets = JSON.parse(localStorage.getItem('attendancePresets') || '[]');
+            presets = presets.filter(p => p.title !== title);
+            presets.unshift(presetData);
+            localStorage.setItem('attendancePresets', JSON.stringify(presets.slice(0, 10))); // Keep top 10
+
+            loadPresets();
+            updateStatus(`💾 Saved "${title}" preset`);
+        }
+
+        function loadPresets() {
+            const presets = JSON.parse(localStorage.getItem('attendancePresets') || '[]');
+            const container = document.getElementById('presetsContainer');
+            container.innerHTML = '';
+
+            presets.forEach((preset, index) => {
+                const btn = document.createElement('div');
+                btn.className = 'preset-btn';
+                btn.innerHTML = preset.title;
+                btn.onclick = () => loadPreset(index);
+                container.appendChild(btn);
+            });
+        }
+
+        function loadPreset(index) {
+            const presets = JSON.parse(localStorage.getItem('attendancePresets') || '[]');
+            const preset = presets[index];
+            if (preset) {
+                students = preset.students.map(s => ({ ...s, attended: false }));
+                updateTable();
+                document.getElementById('saveBtn').style.display = 'inline-block';
+                updateStatus(`📂 Loaded "${preset.title}" (${students.length} students)`);
+            }
+        }
+
+        function updateStatus(message) {
+            const statusBar = document.getElementById('statusBar');
+            statusBar.textContent = message;
+            statusBar.style.display = 'block';
+            setTimeout(() => {
+                statusBar.style.display = 'none';
+            }, 3000);
+        }
+
+        // Voice Recognition
+        document.addEventListener('keydown', function(e) {
+            if (e.code === 'Space' && students.length > 0) {
+                e.preventDefault();
+                if (!isListening) {
+                    startListening();
+                } else {
+                    stopListening();
+                }
+            }
+        });
+
+        function startListening() {
+            if (!('webkitSpeechRecognition' in window)) {
+                alert('❌ Voice recognition requires Chrome/Edge');
+                return;
+            }
+
+            recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isListening = true;
+                document.body.classList.add('listening');
+                updateStatus('🎤 Listening... Say student names!');
+            };
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript.toLowerCase();
+                }
+
+                const uncheckedStudents = students.filter(s => !s.attended);
+                if (uncheckedStudents.length === 0) return;
+
+                let bestMatch = null;
+                let bestScore = 0.4; // Threshold
+
+                uncheckedStudents.forEach(student => {
+                    const score = similarityScore(transcript, student.name.toLowerCase());
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestMatch = student;
+                    }
+                });
+
+                if (bestMatch && bestScore > 0.4) {
+                    const index = students.indexOf(bestMatch);
+                    students[index].attended = true;
+                    updateTable();
+                    updateStatus(`✅ ${bestMatch.name} marked as attended!`);
+                }
+            };
+
+            recognition.onerror = () => {
+                stopListening();
+                updateStatus('❌ Voice recognition error');
+            };
+
+            recognition.onend = () => {
+                stopListening();
+            };
+
+            recognition.start();
+        }
+
+        function stopListening() {
+            if (recognition) {
+                recognition.stop();
+            }
+            isListening = false;
+            document.body.classList.remove('listening');
+        }
+
+        function generatePDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const date = new Date().toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
+
+            let y = 20;
+            doc.setFontSize(20);
+            doc.text('Class Attendance Report', 20, y);
+            y += 15;
+
+            doc.setFontSize(12);
+            doc.text(`Date: ${date}`, 20, y);
+            y += 10;
+
+            const attended = students.filter(s => s.attended);
+            const notAttended = students.filter(s => !s.attended);
+
+            // Attended students
+            doc.text(`Attended (${attended.length}):`, 20, y);
+            y += 10;
+            attended.forEach((student, i) => {
+                if (y > 270) {
+                    doc.addPage();
+                    y = 20;
+                }
+                doc.text(`${i + 1}. ${student.name} (${student.email})`, 25, y);
+                y += 7;
+            });
+
+            // Not attended
+            if (notAttended.length > 0) {
+                if (y > 250) {
+                    doc.addPage();
+                    y = 20;
+                }
+                y += 10;
+                doc.text(`Not Attended (${notAttended.length}):`, 20, y);
+                y += 10;
+                notAttended.forEach((student, i) => {
+                    if (y > 270) {
+                        doc.addPage();
+                        y = 20;
+                    }
+                    doc.text(`${i + 1}. ${student.name} (${student.email})`, 25, y);
+                    y += 7;
+                });
+            }
+
+            doc.save('attendance.pdf');
+            updateStatus('📄 PDF downloaded successfully!');
+        }
+
+        // Enter key for password
+        document.getElementById('passwordInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                checkPassword();
+            }
+        });
+
+        // Auto-focus password input
+        window.onload = () => {
+            document.getElementById('passwordInput').focus();
+        };
+    </script>
+</body>
+</html>
